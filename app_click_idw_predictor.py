@@ -1,9 +1,14 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from math import radians, cos, sin, asin, sqrt
+import math
 
-# 위경도 DMS → DD 변환 함수
+st.set_page_config(layout="wide")
+
+# 🌍 지도 시각화
+import pydeck as pdk
+
+# DMS → DD 변환 함수
 def dms_to_dd(dms_str):
     try:
         d, m, s = map(float, dms_str.split(";"))
@@ -11,24 +16,7 @@ def dms_to_dd(dms_str):
     except:
         return None
 
-# 거리 계산 함수 (Haversine)
-def haversine(lon1, lat1, lon2, lat2):
-    R = 6371  # km
-    lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
-    dlon = lon2 - lon1
-    dlat = lat2 - lat1
-    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
-    return R * 2 * asin(sqrt(a))
-
-# IDW 예측 함수
-def idw_predict(lat, lon, df, col, power=2):
-    distances = df.apply(lambda row: haversine(lon, lat, row["Lon_dd"], row["Lat_dd"]), axis=1)
-    if any(distances == 0):
-        return df.loc[distances == 0, col].values[0]
-    weights = 1 / distances**power
-    return np.sum(weights * df[col]) / np.sum(weights)
-
-# 데이터 불러오기
+# 🔄 데이터 불러오기
 @st.cache_data
 def load_data():
     df = pd.read_excel("total_svf_gvi_bvi_250613.xlsx", sheet_name="gps 포함")
@@ -36,24 +24,58 @@ def load_data():
     df["Lon_dd"] = df["Lon"].apply(dms_to_dd)
     return df
 
-# 📍 앱 실행
-st.set_page_config(layout="wide")
+# 📌 IDW 보간 함수
+def idw_predict(lat, lon, df, target_col, k=4):
+    coords = df[["Lat_dd", "Lon_dd"]].values
+    values = df[target_col].values
+
+    distances = np.array([math.dist([lat, lon], pt) for pt in coords])
+    nearest_idx = np.argsort(distances)[:k]
+
+    nearest_dists = distances[nearest_idx]
+    nearest_values = values[nearest_idx]
+
+    if np.any(nearest_dists == 0):
+        return nearest_values[nearest_dists == 0][0]
+
+    weights = 1 / nearest_dists**2
+    return np.sum(weights * nearest_values) / np.sum(weights)
+
+# 📊 UI
+df = load_data()
 st.title("🗺️ 지도 기반 보행자 열쾌적성 예측 시스템 (IDW 기반)")
 
-df = load_data()
+# 지도 중심 좌표
+center = [df["Lat_dd"].mean(), df["Lon_dd"].mean()]
+st.pydeck_chart(
+    pdk.Deck(
+        map_style="mapbox://styles/mapbox/light-v9",
+        initial_view_state=pdk.ViewState(
+            latitude=center[0],
+            longitude=center[1],
+            zoom=17,
+            pitch=0,
+        ),
+        layers=[
+            pdk.Layer(
+                'ScatterplotLayer',
+                data=df,
+                get_position='[Lon_dd, Lat_dd]',
+                get_color='[200, 30, 0, 160]',
+                get_radius=8,
+            ),
+        ],
+    )
+)
 
-# 🗺️ 지도 시각화
-df_map = df.rename(columns={"Lat_dd": "latitude", "Lon_dd": "longitude"})
-st.map(df_map[["latitude", "longitude"]], zoom=17)
-
-# 📌 지도 클릭
-click = st.experimental_data_editor({"위도": [0.0], "경도": [0.0]}, num_rows="dynamic")
-lat_click = st.number_input("위도 입력 (DD)", value=float(click["위도"][0]))
-lon_click = st.number_input("경도 입력 (DD)", value=float(click["경도"][0]))
+# 입력 섹션
+st.markdown("**예측할 위치의 위도/경도 (Decimal Degrees) 입력**")
+lat_input = st.number_input("위도 (Latitude)", value=35.231743, format="%.6f")
+lon_input = st.number_input("경도 (Longitude)", value=129.080665, format="%.6f")
 
 if st.button("예측 실행"):
-    svf = idw_predict(lat_click, lon_click, df, "SVF")
-    gvi = idw_predict(lat_click, lon_click, df, "GVI")
-    bvi = idw_predict(lat_click, lon_click, df, "BVI")
+    svf = idw_predict(lat_input, lon_input, df, "SVF")
+    gvi = idw_predict(lat_input, lon_input, df, "GVI")
+    bvi = idw_predict(lat_input, lon_input, df, "BVI")
 
     st.success(f"✅ 예측된 SVF: {svf:.3f}, GVI: {gvi:.3f}, BVI: {bvi:.3f}")

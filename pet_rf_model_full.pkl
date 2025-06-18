@@ -1,0 +1,61 @@
+import pandas as pd
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
+import joblib
+
+# 엑셀 파일 경로
+file_path = "total_svf_gvi_bvi_250613.xlsx"  # 본인 경로에 맞게 수정하세요
+
+# 데이터 로드
+df = pd.read_excel(file_path, sheet_name="gps 포함")
+
+# 열 이름 전처리 (대소문자, 공백 제거)
+df.columns = df.columns.str.strip()
+df.columns = df.columns.str.upper()
+
+# DMS → DD 변환 함수
+def dms_to_dd(dms_str):
+    try:
+        d, m, s = map(float, str(dms_str).split(";"))
+        return d + m / 60 + s / 3600
+    except:
+        return None
+
+# 위경도 열 찾기
+lat_col = None
+lon_col = None
+for col in df.columns:
+    if "LAT" in col:
+        lat_col = col
+    if "LON" in col:
+        lon_col = col
+
+if lat_col is None or lon_col is None:
+    raise ValueError("Latitude 또는 Longitude 열을 찾을 수 없습니다.")
+
+# 좌표 변환
+df["LAT_DD"] = df[lat_col].apply(dms_to_dd)
+df["LON_DD"] = df[lon_col].apply(dms_to_dd)
+
+# 모델 학습용 변수 지정 (대문자로)
+features = ["SVF", "GVI", "BVI", "AIRTEMPERATURE", "HUMIDITY", "WINDSPEED"]
+target = "PET"
+
+# 결측치 제거
+df_clean = df.dropna(subset=features + [target])
+
+# 입력, 출력 분리
+X = df_clean[features]
+y = df_clean[target]
+
+# 학습/테스트 데이터 분리
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+
+# 모델 학습
+model = RandomForestRegressor(n_estimators=100, random_state=42)
+model.fit(X_train, y_train)
+
+# 모델 저장
+model_file = "pet_rf_model_full.pkl"
+joblib.dump(model, model_file)
+print(f"모델 학습 완료, '{model_file}' 파일로 저장되었습니다.")

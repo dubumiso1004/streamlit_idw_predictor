@@ -5,7 +5,7 @@ import pydeck as pdk
 import math
 import joblib
 
-# DMS(도;분;초) → Decimal Degrees 변환
+# DMS → DD 변환 함수
 def dms_to_dd(dms_str):
     try:
         d, m, s = map(float, str(dms_str).split(";"))
@@ -13,7 +13,7 @@ def dms_to_dd(dms_str):
     except:
         return None
 
-# Haversine 거리 계산 (위도 경도 거리)
+# 거리 계산 (Haversine)
 def haversine(lat1, lon1, lat2, lon2):
     R = 6371  # km
     phi1 = np.radians(lat1)
@@ -23,7 +23,7 @@ def haversine(lat1, lon1, lat2, lon2):
     a = np.sin(d_phi / 2.0)**2 + np.cos(phi1) * np.cos(phi2) * np.sin(d_lambda / 2.0)**2
     return R * 2 * np.arcsin(np.sqrt(a))
 
-# IDW 보간 함수
+# IDW 보간
 def idw_predict(df, lat, lon, var, power=2):
     df["dist"] = df.apply(lambda row: haversine(lat, lon, row["Lat_dd"], row["Lon_dd"]), axis=1)
     if any(df["dist"] == 0):
@@ -32,12 +32,15 @@ def idw_predict(df, lat, lon, var, power=2):
     df["weight"] = 1 / (df["dist"] ** power)
     return np.sum(df[var] * df["weight"]) / np.sum(df["weight"])
 
-# 데이터 불러오기 (열 이름 수정)
+# 데이터 불러오기 및 열 이름 출력
 @st.cache_data
 def load_data():
     df = pd.read_excel("total_svf_gvi_bvi_250613.xlsx", sheet_name="gps 포함")
+    df.columns = df.columns.str.strip()  # 공백 제거
+    st.write("현재 엑셀 열 이름:", df.columns.tolist())  # 열 이름 출력
+    # 열 이름 맞춰서 수정해주세요:
     df["Lat_dd"] = df["Lat"].apply(dms_to_dd)
-    df["Lon_dd"] = df["Lon"].apply(dms_to_dd)  # 'LON' -> 'Lon'
+    df["Lon_dd"] = df["Lon"].apply(dms_to_dd)
     return df.dropna(subset=["Lat_dd", "Lon_dd", "SVF", "GVI", "BVI"])
 
 # PET 예측 모델 로드
@@ -45,8 +48,8 @@ def load_data():
 def load_model():
     return joblib.load("pet_rf_model_full.pkl")
 
-# 앱 UI 시작
-st.title("🗺️ 지도 클릭 기반 보행자 열쾌적성 및 PET 예측 시스템")
+# Streamlit UI 시작
+st.title("🗺️ 지도 기반 보행자 열쾌적성 및 PET 예측 시스템")
 
 df = load_data()
 model = load_model()
@@ -71,7 +74,6 @@ st.pydeck_chart(pdk.Deck(
     layers=[layer],
 ))
 
-# 수동 좌표 입력
 lat = st.number_input("위도 (Latitude, DD)", value=df["Lat_dd"].mean(), format="%.6f")
 lon = st.number_input("경도 (Longitude, DD)", value=df["Lon_dd"].mean(), format="%.6f")
 
@@ -80,7 +82,6 @@ if st.button("PET 예측 실행"):
     gvi = idw_predict(df.copy(), lat, lon, "GVI")
     bvi = idw_predict(df.copy(), lat, lon, "BVI")
 
-    # 기상 변수는 평균값 사용 (원하면 입력 UI 추가 가능)
     air_temp = df["AirTemperature"].mean()
     humidity = df["Humidity"].mean()
     wind_speed = df["WindSpeed"].mean()

@@ -1,77 +1,58 @@
 import streamlit as st
-from streamlit_folium import st_folium
-import folium
 import pandas as pd
-from idw_utils import idw_interpolation
 import numpy as np
+import pydeck as pdk
+from idw_utils import idw_interpolation, dms_to_dd
 
-# --- 위도경도 문자열을 소수점 형식으로 변환 ---
-def dms_to_dd(dms_str):
-    try:
-        d, m, s = map(float, dms_str.split(";"))
-        return d + m / 60 + s / 3600
-    except:
-        return None
-
-# --- 측정 데이터 불러오기 ---
+# 데이터 불러오기
 @st.cache_data
 def load_data():
     df = pd.read_excel("total_svf_gvi_bvi_250613.xlsx", sheet_name="gps 포함")
+    df.columns = df.columns.str.strip()  # 공백 제거
+
+    # 위도/경도 변환
     df["Lat_dd"] = df["Lat"].apply(dms_to_dd)
     df["Lon_dd"] = df["Lon"].apply(dms_to_dd)
     return df
 
-# --- 보간 함수 ---
-def interpolate_value(df, lat, lon, column, power=2):
-    data = df[["Lat_dd", "Lon_dd", column]].dropna()
-    lats = data["Lat_dd"].values
-    lons = data["Lon_dd"].values
-    values = data[column].values
-    return idw_interpolation(lats, lons, values, lat, lon, power=power)
-
-# --- 메인 앱 ---
-st.set_page_config(layout="centered")
-st.title("🌡️ 지도 클릭 기반 보행자 열쾌적성 예측")
-
-st.markdown("""
-🗺️ 지도 위를 클릭하면 해당 위치의 SVF, GVI, BVI 값을 IDW 방식으로 추정하고,
-
-그 값을 기반으로 PET(Physiological Equivalent Temperature)를 예측합니다.
-""")
-
-# 1. 데이터 불러오기
 df = load_data()
 
-# 2. 지도 설정
-m = folium.Map(location=[df["Lat_dd"].mean(), df["Lon_dd"].mean()], zoom_start=17)
-for _, row in df.iterrows():
-    folium.CircleMarker(
-        location=[row["Lat_dd"], row["Lon_dd"]],
-        radius=4,
-        color="blue",
-        fill=True,
-        fill_color="blue",
-        fill_opacity=0.6
-    ).add_to(m)
+# 중심 좌표 설정
+center = [df["Lat_dd"].mean(), df["Lon_dd"].mean()]
 
-# 3. 사용자 클릭 이벤트 처리
-click_data = st_folium(m, width=700, height=500)
+# 📍 지도 출력
+st.title("🗺️ 지도 기반 보행자 열쾌적성 예측 시스템 (IDW 기반)")
 
-if click_data and click_data.get("last_clicked"):
-    lat = click_data["last_clicked"]["lat"]
-    lon = click_data["last_clicked"]["lng"]
+selected_point = st.map(df[["Lat_dd", "Lon_dd"]], zoom=17)
 
-    svf = interpolate_value(df, lat, lon, "SVF")
-    gvi = interpolate_value(df, lat, lon, "GVI")
-    bvi = interpolate_value(df, lat, lon, "BVI")
+clicked_location = st.session_state.get("clicked_location", None)
 
-    # 간단한 선형 모델 예시 (원하는 예측 모델로 대체 가능)
-    pet = 10 + svf * 15 - gvi * 8 + bvi * 6
+# 지도 클릭 이벤트
+def map_click_event(lat, lon):
+    st.session_state["clicked_location"] = {"lat": lat, "lon": lon}
 
-    st.success(f"📍 클릭한 위치: {lat:.5f}, {lon:.5f}")
-    st.markdown(f"- SVF(IDW 보간): `{svf:.3f}`")
-    st.markdown(f"- GVI(IDW 보간): `{gvi:.3f}`")
-    st.markdown(f"- BVI(IDW 보간): `{bvi:.3f}`")
-    st.markdown(f"\n✅ 예측 PET: `{pet:.2f} °C`")
-else:
-    st.info("지도를 클릭하여 위치를 선택해주세요.")
+map_data = pd.DataFrame({
+    "lat": df["Lat_dd"],
+    "lon": df["Lon_dd"],
+    "SVF": df["SVF"],
+    "GVI": df["GVI"],
+    "BVI": df["BVI"]
+})
+
+# 클릭 입력 받기
+st.write("👉 지도 상 좌표를 클릭해 보간 결과를 확인하세요.")
+clicked = st.map(map_data, zoom=17)
+
+# 실제 좌표 클릭 처리
+if clicked_location:
+    click_lat = clicked_location["lat"]
+    click_lon = clicked_location["lon"]
+
+    svf = idw_interpolation(df, "Lat_dd", "Lon_dd", "SVF", click_lat, click_lon)
+    gvi = idw_interpolation(df, "Lat_dd", "Lon_dd", "GVI", click_lat, click_lon)
+    bvi = idw_interpolation(df, "Lat_dd", "Lon_dd", "BVI", click_lat, click_lon)
+
+    st.success(f"📍 선택 위치: 위도 {click_lat:.6f}, 경도 {click_lon:.6f}")
+    st.write(f"🌤️ 추정 SVF: `{svf:.3f}`")
+    st.write(f"🌿 추정 GVI: `{gvi:.3f}`")
+    st.write(f"🏢 추정 BVI: `{bvi:.3f}`")

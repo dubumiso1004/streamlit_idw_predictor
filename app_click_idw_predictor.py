@@ -37,7 +37,7 @@ def idw_predict(df, lat, lon, var, power=2):
 def load_data():
     df = pd.read_excel("total_svf_gvi_bvi_250613.xlsx", sheet_name="gps 포함")
     df["Lat_dd"] = df["Lat"].apply(dms_to_dd)
-    df["Lon_dd"] = df["LON"].apply(dms_to_dd)  # 열 이름 정확히 확인
+    df["Lon_dd"] = df["Lon"].apply(dms_to_dd)  # 열 이름 정확히 확인
     return df.dropna(subset=["Lat_dd", "Lon_dd", "SVF", "GVI", "BVI"])
 
 # ===========================

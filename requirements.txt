@@ -4,4 +4,4 @@ numpy
 openpyxl
 pydeck
 streamlit-folium
-folium
+joblib

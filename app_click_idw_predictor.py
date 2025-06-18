@@ -1,14 +1,11 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import math
+from math import radians, cos, sin, asin, sqrt
+import folium
+from streamlit_folium import st_folium
 
-st.set_page_config(layout="wide")
-
-# 🌍 지도 시각화
-import pydeck as pdk
-
-# DMS → DD 변환 함수
+# 좌표 문자열 DMS → DD 변환 함수
 def dms_to_dd(dms_str):
     try:
         d, m, s = map(float, dms_str.split(";"))
@@ -16,7 +13,23 @@ def dms_to_dd(dms_str):
     except:
         return None
 
-# 🔄 데이터 불러오기
+# 거리 계산 (Haversine)
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6371  # 지구 반지름 (km)
+    dlat = radians(lat2 - lat1)
+    dlon = radians(lon2 - lon1)
+    a = sin(dlat / 2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2)**2
+    c = 2 * asin(sqrt(a))
+    return R * c * 1000  # meter
+
+# IDW 보간
+def idw_predict(df, lat, lon, var, power=2):
+    df["dist"] = df.apply(lambda row: haversine(lat, lon, row["Lat_dd"], row["Lon_dd"]), axis=1)
+    df = df[df["dist"] > 0]
+    df["weight"] = 1 / (df["dist"] ** power)
+    return np.sum(df[var] * df["weight"]) / np.sum(df["weight"])
+
+# 데이터 로드
 @st.cache_data
 def load_data():
     df = pd.read_excel("total_svf_gvi_bvi_250613.xlsx", sheet_name="gps 포함")
@@ -24,58 +37,29 @@ def load_data():
     df["Lon_dd"] = df["Lon"].apply(dms_to_dd)
     return df
 
-# 📌 IDW 보간 함수
-def idw_predict(lat, lon, df, target_col, k=4):
-    coords = df[["Lat_dd", "Lon_dd"]].values
-    values = df[target_col].values
-
-    distances = np.array([math.dist([lat, lon], pt) for pt in coords])
-    nearest_idx = np.argsort(distances)[:k]
-
-    nearest_dists = distances[nearest_idx]
-    nearest_values = values[nearest_idx]
-
-    if np.any(nearest_dists == 0):
-        return nearest_values[nearest_dists == 0][0]
-
-    weights = 1 / nearest_dists**2
-    return np.sum(weights * nearest_values) / np.sum(weights)
-
-# 📊 UI
-df = load_data()
+# 앱 시작
+st.set_page_config(layout="wide")
 st.title("🗺️ 지도 기반 보행자 열쾌적성 예측 시스템 (IDW 기반)")
 
-# 지도 중심 좌표
-center = [df["Lat_dd"].mean(), df["Lon_dd"].mean()]
-st.pydeck_chart(
-    pdk.Deck(
-        map_style="mapbox://styles/mapbox/light-v9",
-        initial_view_state=pdk.ViewState(
-            latitude=center[0],
-            longitude=center[1],
-            zoom=17,
-            pitch=0,
-        ),
-        layers=[
-            pdk.Layer(
-                'ScatterplotLayer',
-                data=df,
-                get_position='[Lon_dd, Lat_dd]',
-                get_color='[200, 30, 0, 160]',
-                get_radius=8,
-            ),
-        ],
-    )
-)
+df = load_data()
 
-# 입력 섹션
-st.markdown("**예측할 위치의 위도/경도 (Decimal Degrees) 입력**")
-lat_input = st.number_input("위도 (Latitude)", value=35.231743, format="%.6f")
-lon_input = st.number_input("경도 (Longitude)", value=129.080665, format="%.6f")
+# 지도 생성
+m = folium.Map(location=[df["Lat_dd"].mean(), df["Lon_dd"].mean()], zoom_start=17)
+folium.LatLngPopup().add_to(m)
 
-if st.button("예측 실행"):
-    svf = idw_predict(lat_input, lon_input, df, "SVF")
-    gvi = idw_predict(lat_input, lon_input, df, "GVI")
-    bvi = idw_predict(lat_input, lon_input, df, "BVI")
+# 지도 표시
+st_data = st_folium(m, width=700, height=500)
 
-    st.success(f"✅ 예측된 SVF: {svf:.3f}, GVI: {gvi:.3f}, BVI: {bvi:.3f}")
+# 좌표 클릭 시 예측 실행
+if st_data["last_clicked"] is not None:
+    lat = st_data["last_clicked"]["lat"]
+    lon = st_data["last_clicked"]["lng"]
+    
+    svf = idw_predict(df, lat, lon, "SVF")
+    gvi = idw_predict(df, lat, lon, "GVI")
+    bvi = idw_predict(df, lat, lon, "BVI")
+
+    st.success(f"📍 선택된 위치: 위도 {lat:.6f}, 경도 {lon:.6f}")
+    st.markdown(f"✅ 예측된 SVF: `{svf:.3f}`, GVI: `{gvi:.3f}`, BVI: `{bvi:.3f}`")
+else:
+    st.info("지도를 클릭하여 예측할 위치를 선택하세요.")

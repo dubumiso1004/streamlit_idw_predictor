@@ -6,3 +6,4 @@ pydeck
 streamlit-folium
 joblib
 cloudpickle
+scikit-learn

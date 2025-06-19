@@ -1,0 +1,19 @@
+import pandas as pd
+from sklearn.ensemble import RandomForestRegressor
+import cloudpickle
+
+# 1. 데이터 불러오기
+df = pd.read_excel("total_svf_gvi_bvi_250613.xlsx", sheet_name="gps 포함")
+
+# 2. 특성과 타겟 분리
+X_train = df[["SVF", "GVI", "BVI", "AirTemperature", "Humidity", "WindSpeed"]]
+y_train = df["PET"]
+
+# 3. 모델 학습
+model = RandomForestRegressor()
+model.fit(X_train, y_train)
+
+# 4. cloudpickle로 저장
+with open("pet_rf_model_full.pkl", "wb") as f:
+    cloudpickle.dump(model, f)
+
